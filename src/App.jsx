@@ -1288,6 +1288,11 @@ const WORK_TYPES = [
 
 const ELEMENT_TYPES = ["無", "炎", "水", "雷", "地", "草", "氷", "竜", "闇"];
 
+const REFERENCE_PALS = {};
+// パルの参考データベース。確認が取れたパルから少しずつここに追加していく。
+// 形式：{ パル名: { number, elements, skillName, skillDesc, work: {作業名: レベル}, food, drops } }
+// ※不正確なデータを登録しないよう、検索で確認できたものだけをここに入れる。
+
 // 実際の繁殖力値が判明しているパル（基準点）。分かっているものが増えたらここに追加する。
 const KNOWN_BREEDING_VALUES = {
   タマコッコ: 1500,
@@ -1660,6 +1665,7 @@ export default function BreedingLog() {
   const [wishSaving, setWishSaving] = useState(false);
   const [wishError, setWishError] = useState(null);
   const [predictParent1, setPredictParent1] = useState("");
+  const [routeStartPal, setRouteStartPal] = useState("");
   const [predictParent2, setPredictParent2] = useState("");
   const [dexElementFilter, setDexElementFilter] = useState([]);
   const [dexWorkFilter, setDexWorkFilter] = useState("");
@@ -2170,6 +2176,26 @@ export default function BreedingLog() {
     setDexError(null);
   }
 
+  // 参考データベースに情報があれば、編集フォームにまとめて反映する（すでに入力済みの項目は上書きしない）
+  function applyReferenceTemplate() {
+    const ref = REFERENCE_PALS[detailPal];
+    if (!ref) return;
+    if (!dexEditElements.length && ref.elements) setDexEditElements(ref.elements);
+    if (!dexEditSkillName && ref.skillName) setDexEditSkillName(ref.skillName);
+    if (!dexEditSkillDesc && ref.skillDesc) setDexEditSkillDesc(ref.skillDesc);
+    if (ref.work) {
+      setDexEditWork((prev) => {
+        const next = { ...prev };
+        WORK_TYPES.forEach((t) => {
+          if (!next[t] && ref.work[t]) next[t] = ref.work[t];
+        });
+        return next;
+      });
+    }
+    if (!dexEditFood && ref.food != null) setDexEditFood(String(ref.food));
+    if (!dexEditDrops.trim() && ref.drops) setDexEditDrops(ref.drops.join(", "));
+  }
+
   async function handleImageUpload(e) {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -2289,14 +2315,16 @@ export default function BreedingLog() {
   }, [entries]);
 
   // 目的のパルまで最短の配合回数で辿り着くルートを探索する（記録済みの組み合わせのみ使用）
-  function findBreedingRoute(target, combosMap) {
-    const memo = new Map();
-    function solve(pal, visiting) {
-      if (memo.has(pal)) return memo.get(pal);
+  function findBreedingRoute(target, combosMap, requiredLeaf) {
+    const memoNormal = new Map();
+    const memoMust = new Map();
+
+    function solveNormal(pal, visiting) {
+      if (memoNormal.has(pal)) return memoNormal.get(pal);
       const combos = combosMap.get(pal);
       if (!combos || combos.length === 0) {
         const result = { steps: 0, node: { name: pal, leaf: true } };
-        memo.set(pal, result);
+        memoNormal.set(pal, result);
         return result;
       }
       if (visiting.has(pal)) return { steps: Infinity, node: null };
@@ -2304,8 +2332,8 @@ export default function BreedingLog() {
       nextVisiting.add(pal);
       let best = null;
       combos.forEach((combo) => {
-        const r1 = solve(combo.parent1, nextVisiting);
-        const r2 = solve(combo.parent2, nextVisiting);
+        const r1 = solveNormal(combo.parent1, nextVisiting);
+        const r2 = solveNormal(combo.parent2, nextVisiting);
         if (r1.steps === Infinity || r2.steps === Infinity) return;
         const total = 1 + r1.steps + r2.steps;
         if (!best || total < best.steps) {
@@ -2313,10 +2341,54 @@ export default function BreedingLog() {
         }
       });
       const result = best || { steps: Infinity, node: null };
-      memo.set(pal, result);
+      memoNormal.set(pal, result);
       return result;
     }
-    return solve(target, new Set());
+
+    // 「requiredLeaf を必ずどこかで使う」という条件つきの最短ルート
+    function solveMust(pal, visiting) {
+      if (memoMust.has(pal)) return memoMust.get(pal);
+      if (pal === requiredLeaf) {
+        const result = { steps: 0, node: { name: pal, leaf: true } };
+        memoMust.set(pal, result);
+        return result;
+      }
+      const combos = combosMap.get(pal);
+      if (!combos || combos.length === 0) {
+        // これ以上配合できない別のパルなので、requiredLeaf をここには含められない
+        const result = { steps: Infinity, node: null };
+        memoMust.set(pal, result);
+        return result;
+      }
+      if (visiting.has(pal)) return { steps: Infinity, node: null };
+      const nextVisiting = new Set(visiting);
+      nextVisiting.add(pal);
+      let best = null;
+      combos.forEach((combo) => {
+        const n1 = solveNormal(combo.parent1, nextVisiting);
+        const n2 = solveNormal(combo.parent2, nextVisiting);
+        const m1 = solveMust(combo.parent1, nextVisiting);
+        const m2 = solveMust(combo.parent2, nextVisiting);
+        if (m1.steps !== Infinity && n2.steps !== Infinity) {
+          const total = 1 + m1.steps + n2.steps;
+          if (!best || total < best.steps) {
+            best = { steps: total, node: { name: pal, leaf: false, parent1: m1.node, parent2: n2.node } };
+          }
+        }
+        if (n1.steps !== Infinity && m2.steps !== Infinity) {
+          const total = 1 + n1.steps + m2.steps;
+          if (!best || total < best.steps) {
+            best = { steps: total, node: { name: pal, leaf: false, parent1: n1.node, parent2: m2.node } };
+          }
+        }
+      });
+      const result = best || { steps: Infinity, node: null };
+      memoMust.set(pal, result);
+      return result;
+    }
+
+    if (requiredLeaf) return solveMust(target, new Set());
+    return solveNormal(target, new Set());
   }
 
   function flattenRouteSteps(node, out, seen) {
@@ -2337,18 +2409,34 @@ export default function BreedingLog() {
       knownPalNames.find((n) => n === target) ||
       knownPalNames.find((n) => normalizeKana(n.toLowerCase()) === normalizeKana(target.toLowerCase()));
     const resolvedTarget = matchName || target;
-    const result = findBreedingRoute(resolvedTarget, childToCombos);
+
+    const startInput = routeStartPal.trim();
+    let resolvedStart = null;
+    if (startInput) {
+      const startMatch =
+        knownPalNames.find((n) => n === startInput) ||
+        knownPalNames.find((n) => normalizeKana(n.toLowerCase()) === normalizeKana(startInput.toLowerCase()));
+      resolvedStart = startMatch || startInput;
+    }
 
     if (!childToCombos.has(resolvedTarget)) {
-      return { target: resolvedTarget, steps: [], status: "unknown" };
+      return { target: resolvedTarget, start: resolvedStart, steps: [], status: "unknown" };
     }
+
+    const result = findBreedingRoute(resolvedTarget, childToCombos, resolvedStart || undefined);
+
     if (result.steps === Infinity) {
-      return { target: resolvedTarget, steps: [], status: "impossible" };
+      return {
+        target: resolvedTarget,
+        start: resolvedStart,
+        steps: [],
+        status: resolvedStart ? "impossible-with-start" : "impossible",
+      };
     }
     const steps = [];
     flattenRouteSteps(result.node, steps, new Set());
-    return { target: resolvedTarget, steps, status: "found" };
-  }, [mode, query, childToCombos, knownPalNames]);
+    return { target: resolvedTarget, start: resolvedStart, steps, status: "found" };
+  }, [mode, query, routeStartPal, childToCombos, knownPalNames]);
 
   // 繁殖力値推定：親の値の平均（四捨五入）が子の値になるという規則を使い、
   // 記録済みの配合データだけから各パルの「相対的な」ランク値を逆算する
@@ -2530,7 +2618,7 @@ export default function BreedingLog() {
       icon: GitBranch,
       label: "ルート探索",
       placeholder: "作りたいパル名を入力（例：モコロン）",
-      hint: "直接作れない場合、複数回の配合を経る手順を記録済みデータから自動で探します",
+      hint: "直接作れない場合、複数回の配合を経る手順を記録済みデータから自動で探します。「手持ちのパル」を指定すると、それを使うルートに絞り込めます",
     },
     wishlist: {
       icon: Heart,
@@ -2833,6 +2921,33 @@ export default function BreedingLog() {
           </div>
         )}
 
+        {mode === "route" && (
+          <div className="bl-dex-filters">
+            <div className="bl-dex-filter-row">
+              <span className="bl-dex-filter-label">手持ちのパル（任意）</span>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <AutocompleteInput
+                  className="bl-input"
+                  placeholder="持っているパル名（例：モコロン）"
+                  value={routeStartPal}
+                  onChange={setRouteStartPal}
+                  options={knownPalNames}
+                  dexMap={palDex}
+                />
+              </div>
+              {routeStartPal && (
+                <button className="bl-edit-link" onClick={() => setRouteStartPal("")} type="button">
+                  <X size={11} />
+                  クリア
+                </button>
+              )}
+            </div>
+            <div className="bl-mode-hint" style={{ margin: 0 }}>
+              入力すると、そのパルを必ず使うルートだけを探します。空欄のままなら、記録済みの中で一番短いルートを探します。
+            </div>
+          </div>
+        )}
+
         {mode === "parent" && parentModeResults.length > 0 && (
           <div className="bl-summary">
             <div className="bl-summary-label">
@@ -2920,6 +3035,13 @@ export default function BreedingLog() {
                 「{routeResult.target}」を生む記録がありません。名前が正しいか確認するか、まずその組み合わせを記録してください。
               </div>
             </div>
+          ) : routeResult.status === "impossible-with-start" ? (
+            <div className="bl-empty">
+              <GitBranch size={20} style={{ marginBottom: 8, opacity: 0.6 }} />
+              <div>
+                「{routeResult.start}」を使って「{routeResult.target}」まで辿り着くルートは、記録済みの組み合わせの中には見つかりませんでした。手持ちのパル欄を空にすると、別の組み合わせでのルートを探せます。
+              </div>
+            </div>
           ) : routeResult.status === "impossible" ? (
             <div className="bl-empty">
               <GitBranch size={20} style={{ marginBottom: 8, opacity: 0.6 }} />
@@ -2932,6 +3054,11 @@ export default function BreedingLog() {
             </div>
           ) : (
             <div className="bl-combo-list">
+              {routeResult.start && (
+                <div className="bl-mode-hint" style={{ margin: "0 0 4px 0" }}>
+                  「{routeResult.start}」を使うルートです
+                </div>
+              )}
               {routeResult.steps.map((s, i) => (
                 <div className="bl-route-step" key={i}>
                   <span className="bl-route-step-num">STEP {i + 1}</span>
@@ -3342,6 +3469,18 @@ export default function BreedingLog() {
 
               {detailEditing ? (
                 <>
+                  {REFERENCE_PALS[detailPal] && (
+                    <button
+                      type="button"
+                      className="bl-edit-link"
+                      style={{ marginBottom: 12 }}
+                      onClick={applyReferenceTemplate}
+                    >
+                      <Download size={11} />
+                      参考データベースの情報を読み込む（空欄の項目だけ埋まります）
+                    </button>
+                  )}
+
                   <div className="bl-field">
                     <label className="bl-label">図鑑番号</label>
                     <div className="bl-arrow-row" style={{ marginBottom: 0 }}>
