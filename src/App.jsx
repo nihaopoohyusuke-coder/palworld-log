@@ -541,6 +541,20 @@ ${FONT_IMPORT}
 
 .bl-dex-item:hover { border-color: var(--accent); }
 
+.bl-dex-item-unedited { opacity: 0.55; }
+.bl-dex-item-unedited:hover { opacity: 0.85; }
+
+.bl-edited-badge {
+  margin-left: 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--accent);
+  background: rgba(88,92,201,0.1);
+  border: 1px solid rgba(88,92,201,0.3);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
 .bl-dex-item-row {
   display: flex;
   align-items: center;
@@ -879,9 +893,16 @@ ${FONT_IMPORT}
   padding: 7px 10px;
   font-size: 12.5px;
   color: var(--text-muted);
+  opacity: 0.4;
 }
 
-.bl-work-cell.active { color: var(--text); border-color: rgba(88,92,201,0.35); }
+.bl-work-cell.active {
+  color: var(--text);
+  border-color: rgba(88,92,201,0.35);
+  background: rgba(88,92,201,0.07);
+  opacity: 1;
+  font-weight: 600;
+}
 
 .bl-work-cell .lv {
   font-family: 'JetBrains Mono', monospace;
@@ -1909,16 +1930,30 @@ export default function BreedingLog() {
   const dexList = useMemo(() => {
     return Object.entries(dexProfiles)
       .filter(([, p]) => !p.removed)
-      .map(([name, p]) => ({
-        name,
-        n: p.number,
-        suffix: p.suffix || "",
-        details: p.details || "",
-        work: p.work || {},
-        elements: p.elements || [],
-        image: p.image || null,
-        drops: p.drops || [],
-      }))
+      .map(([name, p]) => {
+        const hasWork = p.work && Object.values(p.work).some((v) => v > 0);
+        const edited = !!(
+          p.skillName ||
+          p.skillDesc ||
+          hasWork ||
+          (p.elements && p.elements.length > 0) ||
+          p.food != null ||
+          (p.drops && p.drops.length > 0) ||
+          p.details ||
+          p.image
+        );
+        return {
+          name,
+          n: p.number,
+          suffix: p.suffix || "",
+          details: p.details || "",
+          work: p.work || {},
+          elements: p.elements || [],
+          image: p.image || null,
+          drops: p.drops || [],
+          edited,
+        };
+      })
       .sort((a, b) => a.n - b.n || a.suffix.localeCompare(b.suffix) || a.name.localeCompare(b.name, "ja"));
   }, [dexProfiles]);
 
@@ -2998,7 +3033,12 @@ export default function BreedingLog() {
           ) : (
             <div className="bl-dex-grid">
               {dexFiltered.map((d) => (
-                <button className="bl-dex-item" key={d.name} onClick={() => openPalDetail(d.name)} type="button">
+                <button
+                  className={`bl-dex-item${d.edited ? "" : " bl-dex-item-unedited"}`}
+                  key={d.name}
+                  onClick={() => openPalDetail(d.name)}
+                  type="button"
+                >
                   <div className="bl-dex-item-row">
                     {d.image ? (
                       <img src={d.image} alt="" className="bl-dex-thumb" />
@@ -3008,7 +3048,10 @@ export default function BreedingLog() {
                       </div>
                     )}
                     <div className="bl-dex-item-head">
-                      <span className="bl-dexno">No.{String(d.n).padStart(3, "0")}{d.suffix}</span>
+                      <span className="bl-dexno">
+                        No.{String(d.n).padStart(3, "0")}{d.suffix}
+                        {d.edited && <span className="bl-edited-badge">編集済み</span>}
+                      </span>
                       <span className="bl-dex-name">{d.name}</span>
                       {dexWorkFilter && (
                         <span className="bl-dex-worklv">
