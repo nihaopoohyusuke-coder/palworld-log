@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import "./storage";
 import { Egg, Search, Plus, Trash2, PawPrint, X, Loader2, Target, ArrowRight, Pencil, BookOpen, Download, Upload, GitBranch, Heart, Check, Calculator, ChevronDown } from "lucide-react";
 
 const FONT_IMPORT = `
@@ -543,17 +542,6 @@ ${FONT_IMPORT}
 
 .bl-dex-item-unedited { opacity: 0.55; }
 .bl-dex-item-unedited:hover { opacity: 0.85; }
-
-.bl-edited-badge {
-  margin-left: 5px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
-  color: var(--accent);
-  background: rgba(88,92,201,0.1);
-  border: 1px solid rgba(88,92,201,0.3);
-  padding: 1px 5px;
-  border-radius: 4px;
-}
 
 .bl-dex-item-row {
   display: flex;
@@ -3050,7 +3038,6 @@ export default function BreedingLog() {
                     <div className="bl-dex-item-head">
                       <span className="bl-dexno">
                         No.{String(d.n).padStart(3, "0")}{d.suffix}
-                        {d.edited && <span className="bl-edited-badge">編集済み</span>}
                       </span>
                       <span className="bl-dex-name">{d.name}</span>
                       {dexWorkFilter && (
